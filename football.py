@@ -12,8 +12,11 @@ black = 0, 0, 0
 green = 0, 255, 0
 red = 255, 0, 0
 player_size = (10, 10)
+ball_size = (20,20)
 white = 255, 255, 255
-blue= 0, 0, 255
+blue = 0, 0, 255
+brown = 101, 67, 33
+ball = pygame.Rect((0,0), ball_size)
 
 dT = 0
 
@@ -31,8 +34,45 @@ field_matrix = [[None for _ in range(54)] for _ in range(120)]
 # up to 6 yards deep
 off_line_matrix = [[None for _ in range(54)] for _ in range(6)]
 
-class Player(pygame.sprite.Sprite):
+class Ball(pygame.sprite.Sprite):
     def __init__(self, color, size, speed):
+        # Call the parent class (Sprite) constructor
+        pygame.sprite.Sprite.__init__(self)
+
+        # Create an image of a rectangle
+        self.image = pygame.Surface(size)
+
+        # Fetch the rectangle object that has the dimensions of the image
+        # Update the position of this object by setting the values of rect.x and rect.y
+        self.rect = self.image.get_rect()
+        self.speed = speed
+        self.direction = Vector2()
+        self.residual = Vector2()
+
+class Player_Possession(Ball):
+    def __init__(self, color, size, speed):
+        # Call the parent class (Sprite) constructor
+        pygame.sprite.Sprite.__init__(self)
+
+        # Create an image of a rectangle
+        self.image = pygame.Surface(size)
+        self.image.fill(color)
+        # Fetch the rectangle object that has the dimensions of the image
+        # Update the position of this object by setting the values of rect.x and rect.y
+        self.rect = self.image.get_rect()
+        self.speed = speed
+        self.direction = Vector2()
+        self.residual = Vector2()
+
+    # def set_possession(self, possession, pos):
+    #     self.possession = possession
+    #     self.pos = pos
+    #     while possession == True:
+    #         self.rect.update((pos[0]*yard2px_width, pos[1]*yard2px_height), self.rect.size)
+        
+
+class Player(pygame.sprite.Sprite):
+    def __init__(self, color, size, speed, role, ofb):
         # Call the parent class (Sprite) constructor
         pygame.sprite.Sprite.__init__(self)
 
@@ -47,36 +87,44 @@ class Player(pygame.sprite.Sprite):
         self.speed = speed
         self.direction = Vector2()
         self.residual = Vector2()
-        
+        self.role = role
+        self.possession = False
+        self.ofb = ofb
 
-    def set_position(self, pos):
-        self.rect.update((pos[0]*yard2px_width, pos[1]*yard2px_height), self.rect.size)
+    #player class update function
+    def update(self):
+        #INITIAL role will pull from dict
+        if self.role == 'passer':
+            self.update_passer()
+            pass
+        if self.role == 'blocker':
+            #self.update_blocker()
+            pass
+        if self.role == 'receiver':
+            self.update_receiver()
+        if self.role == 'coverage':
+            self.update_coverage()
+            #so on and so forth
+        if self.possession:
+            ball.clamp_ip(self.rect)
 
-    def set_target(self, rel_target):
-        rel_target = Vector2(rel_target)*yard2px.elementwise()
-        position = Vector2(self.rect.center)
-        self.target = position + rel_target
-        print(self.target)
+    #boolean to determine player possession
+    def set_possession(self, possession):
+        self.possession = possession
 
-    def next_target(self):
-        self.route_index += 1
-        #ends the route once the max number of index items (target points) is achieved
-        if self.route_index == len(self.route):
-            self.target = None
-        #continue the route if target points remain
-        else:
-            self.set_target(self.route[self.route_index])
-
-        
-class Receiver(Player):
+    #sets initial play behavior for each player on the field      
     def set_route(self,route):
         self.route = route
         # if route == 'block':
-        #     block()
+        #     role = 'blocker'
+        # elseif role = 'receiver'
+        if self.route == "noroute":
+            return
         self.route_index = 0
         self.set_target(self.route[self.route_index])
-    
-    def update(self):
+
+#receiver behavior   
+    def update_receiver(self):
         """bring in route from previous function, hold pos if final target reached, update position towards target over time
         """
         if self.target == None:
@@ -85,16 +133,32 @@ class Receiver(Player):
         self.direction = (self.target - position)
         if self.direction.magnitude() < 12:
             self.next_target()
-            return
-  
+            return 
         distance = self.direction.normalize() * self.speed * 0.016
         distance += self.residual
-        self.residual = Vector2(distance.x-int(distance.x), distance.y-int(distance.y))
-        
-                
-        self.rect.move_ip(distance)
+        self.residual = Vector2(distance.x-int(distance.x), distance.y-int(distance.y))              
+        self.rect.move_ip(distance) 
 
-class Coverage(Player):
+        nearest = min([Vector2(position - yeet.rect.center).magnitude() for yeet in defense_group])
+        print(nearest)
+        if nearest > 50:
+            self.ofb = True
+        else:
+            self.ofb = False
+            
+
+
+    def set_position(self, pos):
+        self.rect.update((pos[0]*yard2px_width, pos[1]*yard2px_height), self.rect.size)
+
+    def set_target(self, rel_target):
+        rel_target = Vector2(rel_target)*yard2px.elementwise()
+        position = Vector2(self.rect.center)
+        self.target = position + rel_target
+    
+
+
+#coverage behavior
     def set_coverage(self, coverage, man):
         """bring in coverage call out, make asignment based on position dictionary
         """
@@ -110,60 +174,77 @@ class Coverage(Player):
             #pass in offensive role from offensive and defensive position dictionaries
             self.target = man
 
-    def update(self):
+    def update_coverage(self):
         """bring in coverage from previous function, set pos relative to zone or assigned player, update position over time
         """
-        position=Vector2(self.rect.center)*yard2px.elementwise()
+        position = Vector2(self.rect.center)*yard2px.elementwise()
         target = Vector2(self.target.rect.center)*yard2px.elementwise()
         self.direction = (target - position)
-
         if self.direction.magnitude() == 0:
             return
         distance = self.direction.normalize() * self.speed * 0.016
         distance += self.residual
         self.residual = Vector2(distance.x-int(distance.x), distance.y-int(distance.y))
-      
         self.rect.move_ip(distance)
+
+
+
+    def next_target(self):
+        self.route_index += 1
+        #ends the route once the max number of index items (target points) is achieved
+        if self.route_index == len(self.route):
+            self.target = None
+        #continue the route if target points remain
+        else:
+            self.set_target(self.route[self.route_index])
+        
+        
+ #passer behavior
+    def pass_ball(self):
+        #survey players on field, check for open receiver
+        if self.possession:
+            for yeet in offense_group:
+                if yeet.role == 'receiver' and yeet.ofb:
+                    yeet.possession = True
+                    #update role to runner tbd later
+                    self.possession = False
+
+    def update_passer(self):
+        self.pass_ball()
         
 
+    
+    #def throw(self):
+        #if open receiver, throw ball
         
-
-
-
-    #def behavior(self,carrier):
-        #determine wide receiver behavior prior to a catch
-        #if carrier==qb1:
-            #if self.target==(0,0):
-                #return (0,0)
-            #else:
-                #return (0,1)
-        #if carrier==self:
-            #move towards end zone
-            #return
-
-
 def team_creation():
     offense_group = pygame.sprite.Group()
     offense = {
-        "wrx": Receiver(red, player_size, 90),
-        "wry": Receiver(red, player_size, 90)
+        "wrx": Player(red, player_size, random.randint(80,99), 'receiver', False),
+        "wry": Player(red, player_size, random.randint(80,99), 'receiver', False),
+        "qb": Player(red, player_size, 70, 'passer', False),
+        "c": Player(red, player_size, 55, 'blocker', False)
     }
 
     defense_group = pygame.sprite.Group()
     defense = {
-        "cb1": Coverage(blue, player_size, 85),
-        "cb2": Coverage(blue, player_size, 45)
+        "cb1": Player(blue, player_size, random.randint(80,99), 'coverage', False),
+        "cb2": Player(blue, player_size, random.randint(80,99), 'coverage', False)
     }
-
+    
     for pos, player in offense.items():
         offense_group.add(player)
 
     for pos, player in defense.items():
         defense_group.add(player)
+
     
+        
     return(offense_group, defense_group, offense, defense)
 
 formation_off = {
+    "c": (0,0),
+    "qb": (0,7),
     "wrx": (-20,0),
     "wry": (20,0)
 }
@@ -173,7 +254,7 @@ formation_def ={
     "cb2": ["wry",(2,-5)]
 }
 
-def position_routes(missionary, doggy = None):
+def position_routes(missionary, doggy):
     """missionary = position on the field relative to origin
     doggy = player ass
     """
@@ -181,6 +262,9 @@ def position_routes(missionary, doggy = None):
         available_route_groups = ['any', 'left']
     else:
         available_route_groups = ['any', 'right']
+    if doggy == "qb" or doggy == "c":
+        route = "noroute"
+        return route
     available = {}
     for route_group in available_route_groups:
         for name, route in routes[route_group].items():
@@ -188,7 +272,7 @@ def position_routes(missionary, doggy = None):
     route = random.choice(list(available.values()))
     return route
 
-
+weed = None
 
 def player_setup(origin):
     """pull in playcall from playbook, Set up the player formation relative to the origin (location of the center), assign routes and assignments based on playcall
@@ -197,11 +281,18 @@ def player_setup(origin):
         formation (string): a string containing name of formation
     """
 
+    # while game_state='snap':
+    #     if pos == "qb":
+    #         possession = True
+    #         return possession
+
     for key, pos in formation_off.items():
-        route = position_routes(pos)
+        route = position_routes(pos, key)
         abs_pos=[sum(x) for x in zip(pos,origin)]
         offense[key].set_position(abs_pos)
         offense[key].set_route(route)
+    offense["c"].set_possession(True)
+    weed = offense["c"]
 
     for key, pos in formation_def.items():
         man, rel_pos = pos[0], pos[1]
@@ -211,9 +302,6 @@ def player_setup(origin):
         abs_pos=[sum(x) for x in zip(rel_pos, off_pos, origin)]
         defense[key].set_position(abs_pos)
         defense[key].set_coverage(coverage['man'], offense[man])
-
-
-
 
 
 def draw_field(bounds_rect):
@@ -250,7 +338,10 @@ routes={
     "right":{
         "lslant":[(0,-5), (-5,-10), (-10,-15), (-15,-20), (-20,-25), (-25,-30)],
         "lsluggo":[(0,-5), (-5,-10), (-10,-15), (-10,-300)],
-        }
+        },
+    "noroute":{
+        "noroute": None
+    }
 }
 
 
@@ -260,7 +351,7 @@ coverage={
 }
 
 
-
+low_hanging_ball = Ball(black, ball_size, 300)
 offense_group, defense_group, offense, defense = team_creation()
 game_state = 'pp'
 
@@ -275,20 +366,30 @@ while True:
             sys.exit()
     if game_state=='pp':
         player_setup((27,60))
-        game_state='snap' 
+        game_state='snap'
+        #need some sort of snap function or code to randomize penalties, fumbles, etc
+        offense["c"].set_possession(False)
+        offense["qb"].set_possession(True)
+        weed = offense["qb"]
+
     if game_state=='snap':
         offense_group.update()
         defense_group.update()
+        low_hanging_ball.update()
+        # Player.set_possession.update()
 
     # ballrect = ballrect.move(speed)
     # if ballrect.left < 0 or ballrect.right > width:
     #     speed[0] = -speed[0]
     # if ballrect.top < 0 or ballrect.bottom > height:
     #     speed[1] = -speed[1]
-    screen.fill(black)
+    screen.fill(blue)
     draw_field(field_bounds)
+    #draw possession of ball
+    pygame.draw.rect(screen, brown, ball)
     offense_group.draw(screen)
     defense_group.draw(screen)
+    # set_possession.draw(screen)
     # screen.blit()
     # screen.blit(ball, ballrect)
     pygame.display.flip()
